@@ -1,0 +1,42 @@
+{
+  "name": "os3d",
+  "productName": "OS3D",
+  "version": "1.0.0",
+  "description": "A real-time 3D oscilloscope for system audio, microphone input, and synthesized signals.",
+  "author": "Lands End Studios Inc.",
+  "license": "GPL-3.0-or-later",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.landsendstudios.os3d",
+    "asar": true,
+    "artifactName": "OS3D.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "index.html",
+      "main.js",
+      "icon.ico",
+      "LICENSE",
+      "package.json"
+    ],
+    "win": {
+      "icon": "icon.ico",
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "OS3D.${ext}",
+      "requestExecutionLevel": "user"
+    }
+  }
+}

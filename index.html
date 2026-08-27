@@ -1,0 +1,1373 @@
+<!--
+Copyright (C) 2026 Lands End Studios Inc.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OS3D — 3D Oscilloscope</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  html, body { margin: 0; height: 100%; background: #04070a; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+  /* everything inside #ui is em-based so the ui-size slider can scale the
+     whole panel by just changing its font-size */
+  #ui {
+    position: fixed; top: 14px; left: 16px; color: #9fdcb2; max-width: 46em;
+    font: 13px/1.5 "Cascadia Code", Consolas, monospace;
+    user-select: none; text-shadow: 0 0 6px rgba(80,255,140,.35);
+  }
+  #ui h1 { font-size: 1.15em; margin: 0 0 .6em; letter-spacing: 2px; color: #c8ffd8; display: flex; align-items: center; gap: .6em; }
+  button {
+    background: rgba(20,40,28,.6); color: #b8f5c8; border: 1px solid #2f6b45;
+    font: inherit; padding: .3em .9em; cursor: pointer; border-radius: 3px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:hover { background: rgba(40,90,58,.7); }
+  button:disabled { opacity: .35; cursor: default; }
+  button.active { background: #2f6b45; color: #eaffec; }
+  button.mini { padding: .1em .6em; font-size: .85em; }
+  select {
+    background: rgba(20,40,28,.8); color: #b8f5c8; border: 1px solid #2f6b45;
+    font: inherit; font-size: .92em; padding: .15em .3em; border-radius: 3px;
+  }
+  #status { margin-top: .6em; color: #6fae83; max-width: 52ch; }
+  .row { margin-top: .7em; display: flex; align-items: center; gap: .75em; flex-wrap: wrap; }
+  .row label { display: flex; align-items: center; gap: .4em; color: #79c491; font-size: .92em; }
+  .row button { padding: .25em .8em; font-size: .92em; }
+  .grp { color: #4d8763; font-size: .85em; letter-spacing: 1px; width: 3.3em; text-align: right; }
+  input[type=range] { width: 6em; accent-color: #3fae63; }
+  input[type=text] {
+    background: rgba(20,40,28,.8); color: #b8f5c8; border: 1px solid #2f6b45;
+    font: inherit; font-size: .92em; padding: .2em .4em; border-radius: 3px;
+    flex: 1; min-width: 8em;
+  }
+  input[type=number] {
+    background: rgba(20,40,28,.8); color: #b8f5c8; border: 1px solid #2f6b45;
+    font: inherit; font-size: .92em; padding: .2em .3em; border-radius: 3px;
+    width: 4.4em;
+  }
+  [hidden] { display: none !important; }
+  input[type=color] {
+    width: 2.6em; height: 1.7em; padding: 1px; border: 1px solid #2f6b45;
+    border-radius: 3px; background: rgba(20,40,28,.6); cursor: pointer;
+  }
+  #hints {
+    position: fixed; bottom: 12px; left: 16px; color: #48705a;
+    font: 12px/1.6 Consolas, monospace; user-select: none;
+  }
+  /* phones & touch: panel spans the width and scrolls, targets get a touch-size
+     floor but stay compact — all in em so the ui-size slider still works */
+  @media (max-width: 700px), (pointer: coarse) {
+    #ui { left: 10px; right: 10px; top: 10px; max-width: none; max-height: 62dvh; overflow-y: auto; overscroll-behavior: contain; }
+    button { min-height: 2.4em; }
+    input[type=range] { flex: 1 1 5em; min-width: 4.5em; }
+    input[type=number] { min-height: 2em; width: 4.8em; }
+    input[type=color] { width: 2.9em; height: 2em; }
+    #hints { left: 10px; right: 10px; bottom: 8px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h1>OS3D
+    <button id="bHide" class="mini">hide</button>
+    <button id="bFull" class="mini">fullscreen</button>
+  </h1>
+  <div id="panel">
+    <div class="row">
+      <button id="bSys">system audio</button>
+      <button id="bMic">microphone</button>
+      <button id="bDemo">demo signal</button>
+      <select id="selDemo" title="demo tone">
+        <option value="drift">drift (3:2)</option>
+        <option value="circle">circle</option>
+        <option value="octave">octave ∞</option>
+        <option value="saw">saw scan</option>
+        <option value="sweep">sweep spiral</option>
+        <option value="noise">noise cloud</option>
+        <option value="chord">chord knot</option>
+        <option value="fm">fm bells</option>
+        <option value="pulse">pulse gate</option>
+        <option value="brown">brown drift</option>
+        <option value="hypercube">hypercube</option>
+        <option value="custom">custom osc</option>
+        <option value="formula">formula</option>
+      </select>
+    </div>
+    <div class="row rowCustom" hidden><span class="grp">L</span>
+      <select id="cuLType"><option value="sine">sine</option><option value="square">square</option><option value="sawtooth">saw</option><option value="triangle">triangle</option></select>
+      <label>freq <input type="range" id="cuLF" min="10" max="1500" step="0.5"> <span id="vLF"></span></label>
+    </div>
+    <div class="row rowCustom" hidden><span class="grp">R</span>
+      <select id="cuRType"><option value="sine">sine</option><option value="square">square</option><option value="sawtooth">saw</option><option value="triangle">triangle</option></select>
+      <label>freq <input type="range" id="cuRF" min="10" max="1500" step="0.5"> <span id="vRF"></span></label>
+      <label>slide <input type="range" id="cuDet" min="-5" max="5" step="0.05"></label>
+    </div>
+    <div class="row rowCustom" hidden><span class="grp">fm</span>
+      <label>rate <input type="range" id="cuRate" min="0" max="20" step="0.05"></label>
+      <label>depth <input type="range" id="cuDepth" min="0" max="600" step="1"></label>
+    </div>
+    <div class="row rowFormula" hidden><span class="grp">x(t)</span><input type="text" id="fxL" spellcheck="false"></div>
+    <div class="row rowFormula" hidden><span class="grp">y(t)</span><input type="text" id="fxR" spellcheck="false"><button id="bApply">apply</button></div>
+    <div id="status">pick a source — for system audio, share a screen/tab and tick “also share audio”.</div>
+    <div class="row"><span class="grp">view</span>
+      <button id="bFront">front</button>
+      <button id="bSide">side</button>
+      <button id="bTop">top</button>
+      <button id="bIso">3d</button>
+      <button id="bBox">box: off</button>
+    </div>
+    <div class="row"><span class="grp">angle</span>
+      <label>yaw <input type="number" id="nYaw" step="5" title="rotation about the vertical axis, degrees">°</label>
+      <label>pitch <input type="number" id="nPitch" step="5" title="rotation about the horizontal axis, degrees">°</label>
+      <label>roll <input type="number" id="nRoll" step="5" title="rotation in the screen plane, degrees">°</label>
+    </div>
+    <div class="row"><span class="grp">flip</span>
+      <button id="bFlipX" title="mirror the left-channel axis (subtle with symmetric signals)">x</button>
+      <button id="bFlipY" title="mirror the right-channel axis (subtle with symmetric signals)">y</button>
+      <button id="bFlipZ" title="reverse trail depth/time (most visible in 3d view)">z</button>
+    </div>
+    <div class="row"><span class="grp">spin</span>
+      <button id="bSpin">spin: off</button>
+      <select id="selAxis" title="axis the spin turns about">
+        <option value="yaw">about yaw</option>
+        <option value="pitch">about pitch</option>
+        <option value="roll">about roll</option>
+      </select>
+      <label>speed <input type="range" id="rSpeed" min="0" max="1.2" step="0.01"></label>
+      <label>ui size <input type="range" id="rUi" min="0.5" max="1.6" step="0.05"></label>
+    </div>
+    <div class="row"><span class="grp">beam</span>
+      <input type="color" id="cBeam" title="beam colour">
+      <label>glow <input type="range" id="rGlow" min="0.3" max="3" step="0.05"></label>
+      <label>size <input type="range" id="rBeam" min="1" max="9" step="0.1"></label>
+      <label>gain <input type="range" id="rGain" min="0.2" max="6" step="0.05"></label>
+      <button id="bAuto">auto-gain: on</button>
+    </div>
+    <div class="row"><span class="grp">trail</span>
+      <input type="color" id="cTrail" title="trail colour">
+      <label>length <input type="range" id="rTrail" min="1" max="1200" step="1"> <span id="vTrail"></span></label>
+      <label>intensity <input type="range" id="rTrailInt" min="0" max="3" step="0.05"></label>
+    </div>
+    <div class="row"><span class="grp">colour</span>
+      <select id="selPreset">
+        <option value="green">green (P1)</option>
+        <option value="amber">amber (P3)</option>
+        <option value="cyan">cyan (P11)</option>
+        <option value="white">white (P4)</option>
+        <option value="magenta">magenta</option>
+        <option value="custom">custom</option>
+      </select>
+      <button id="bCycle">cycle: off</button>
+      <label>bg <input type="color" id="cBg" title="background colour"></label>
+      <button id="bReset" title="reset all settings">reset</button>
+    </div>
+  </div>
+</div>
+<div id="hints">drag&nbsp;·&nbsp;rotate&nbsp;&nbsp;&nbsp;scroll&nbsp;·&nbsp;zoom&nbsp;&nbsp;&nbsp;space&nbsp;·&nbsp;spin&nbsp;&nbsp;&nbsp;H&nbsp;·&nbsp;hide&nbsp;ui&nbsp;&nbsp;&nbsp;F&nbsp;·&nbsp;fullscreen&nbsp;&nbsp;&nbsp;flip:&nbsp;X=left&nbsp;&nbsp;Y=right&nbsp;&nbsp;Z=time</div>
+
+<script>
+"use strict";
+const IS_ELECTRON = navigator.userAgent.includes("Electron");
+
+/* ================= settings (persisted) ================= */
+const SETTINGS_KEY = "os3d-settings-v2";
+const DEFAULTS = {
+  spinOn: false, spinSpeed: 0.25, trailLen: 48, glow: 1.0, beamSize: 1.0,
+  gain: 1.0, autoGain: true, showBox: false, zoom: 0.9,
+  beamColor: "#45ff78", trailColor: "#2fd162", bgColor: "#04070a",
+  trailInt: 1.0, uiScale: 1.0, hueCycle: false, preset: "green", uiHidden: false,
+  demoTone: "drift",
+  yaw: 0, pitch: 0, roll: 0, spinAxis: "yaw",
+  flipX: false, flipY: false, flipZ: false,
+  custom: { lt: "sine", lf: 220, rt: "sine", rf: 330, det: 0.2, rate: 0, depth: 0 },
+  formulaL: "sin(tau*220*t)",
+  formulaR: "cos(tau*220*t + 3*sin(tau*0.5*t))",
+};
+let S = { ...DEFAULTS };
+try { S = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; } catch (_) {}
+
+// coalesced write — dragging a slider or spinning the wheel fires save() dozens of
+// times a second, and JSON.stringify + a synchronous localStorage write on each one
+// is enough to show up as jank
+let saveTimer = 0;
+function flushSave() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = 0; }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(S)); } catch (_) {}
+}
+function save() {
+  if (!saveTimer) saveTimer = setTimeout(() => { saveTimer = 0; flushSave(); }, 300);
+}
+// a pending write must not be lost when the page goes away
+addEventListener("pagehide", () => { if (saveTimer) flushSave(); });
+addEventListener("visibilitychange", () => { if (document.hidden && saveTimer) flushSave(); });
+
+const PRESETS = {
+  green:   { beamColor: "#45ff78", trailColor: "#2fd162" },
+  amber:   { beamColor: "#ffb545", trailColor: "#d18a2f" },
+  cyan:    { beamColor: "#45d8ff", trailColor: "#2f9fd1" },
+  white:   { beamColor: "#f2fff6", trailColor: "#9fb3a8" },
+  magenta: { beamColor: "#ff56c8", trailColor: "#c93b96" },
+};
+
+/* ================= colour helpers =================
+   these run every frame, so they write into caller-supplied arrays rather than
+   returning fresh ones — the old hsl2rgb built a 6×3 array-of-arrays per call */
+const hexCache = new Map();   // "#45ff78" -> 0x45ff78, parsed once per distinct colour
+function hexToRgb(h, out) {
+  let v = hexCache.get(h);
+  if (v === undefined) {
+    if (hexCache.size > 64) hexCache.clear();   // dragging the colour picker mints a new key per step
+    v = parseInt(h.slice(1), 16) | 0;
+    hexCache.set(h, v);
+  }
+  out[0] = (v >> 16 & 255) / 255;
+  out[1] = (v >> 8 & 255) / 255;
+  out[2] = (v & 255) / 255;
+  return out;
+}
+function rotHue(rgb, deg, out) {
+  const r = rgb[0], g = rgb[1], b = rgb[2];
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d > 0) {
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6; if (h < 0) h += 1;
+  }
+  const l = (mx + mn) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  h = (h + deg / 360) % 1;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+  const m = l - c / 2;
+  switch (Math.floor(h * 6) % 6) {
+    case 1:  out[0] = x; out[1] = c; out[2] = 0; break;
+    case 2:  out[0] = 0; out[1] = c; out[2] = x; break;
+    case 3:  out[0] = 0; out[1] = x; out[2] = c; break;
+    case 4:  out[0] = x; out[1] = 0; out[2] = c; break;
+    case 5:  out[0] = c; out[1] = 0; out[2] = x; break;
+    default: out[0] = c; out[1] = x; out[2] = 0;
+  }
+  out[0] += m; out[1] += m; out[2] += m;
+  return out;
+}
+
+/* ================= WebGL setup ================= */
+const canvas = document.getElementById("c");
+const gl = canvas.getContext("webgl", {
+  antialias: true, alpha: false,
+  powerPreference: "high-performance",   // don't land on the integrated GPU on hybrid laptops
+  preserveDrawingBuffer: false,          // lets the driver discard instead of copying each frame
+});
+
+// Long trails need 32-bit line indices, so without that extension the slice count has
+// to stay inside the 16-bit range. Multi-draw sidesteps indices entirely (see below),
+// so either extension unlocks the long trail.
+const uintIdx = gl.getExtension("OES_element_index_uint");
+const multiDraw = gl.getExtension("WEBGL_multi_draw");
+const MAX_FRAMES = (uintIdx || multiDraw) ? 1200 : 128; // depth slices kept at max trail length
+const SAMPLES = 512;                     // points per slice
+const TOTAL = MAX_FRAMES * SAMPLES;
+
+function shader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw gl.getProgramInfoLog(p);
+  return p;
+}
+
+// pos = (x, y, ring slot, beam velocity). Slow beam = bright, like a real CRT.
+// Age is derived from the slot vs the ring head, so only the newest slice is
+// uploaded each frame. ageMode=1 reads pos.z as a literal age (reference cube).
+const VS = `
+attribute vec4 pos;
+uniform mat3 rot;
+uniform vec3 flip;
+uniform float aspect, zoom, ptScale;
+uniform float head, count, maxF, ageMode, depthLen, persK;
+varying float vAge;
+varying float vB;
+void main() {
+  float age = pos.z;
+  if (ageMode < 0.5) {
+    // NOT mod(head - pos.z + maxF, maxF): for the newest slice pos.z == head, so
+    // that argument is exactly maxF — the wrap boundary. mod() there returns maxF
+    // instead of 0 on some drivers (x/y rounds to 0.99999994, floor gives 0), which
+    // aged the live beam to ~1.0 and drew it dim at the far end of the trail.
+    // The newest slice is the only one that can hit the boundary, so only the beam
+    // was affected. A conditional add is exact for every slot.
+    float rel = head - pos.z;
+    if (rel < 0.0) rel += maxF;
+    age = count > 1.0 ? rel / (count - 1.0) : 0.0;
+  }
+  vAge = age;
+  vB = clamp(0.025 / (pos.w + 0.0008), 0.06, 2.5);
+  // newest slice fixed toward the viewer; long trails extend further back instead
+  // of compressing into a fixed window
+  // flip mirrors each axis about the scene centre before the view rotation, so the
+  // depth extent is unchanged and the persK camera guard below still holds
+  vec3 p = vec3(pos.x, pos.y, -0.75 + age * depthLen) * flip;
+  p = rot * p;
+  // homogeneous perspective: the GPU divides by w AND clips w <= 0, so geometry
+  // swinging behind the camera disappears instead of rendering as an inverted
+  // ghost through the screen center
+  float w = 1.0 + p.z * persK;
+  vec2 xy = p.xy * zoom;
+  xy.x /= aspect;
+  gl_Position = vec4(xy, 0.0, w);
+  gl_PointSize = ptScale * (0.7 + 0.45 * min(vB, 2.0)) / max(w, 0.1);
+}`;
+
+// neckGain/neckK: extra brightness on the youngest slices so the live beam
+// visibly flows into the tail instead of floating in front of it
+const FS_LINE = `
+precision mediump float;
+varying float vAge;
+varying float vB;
+uniform vec3 color;
+uniform float base;
+uniform float neckGain, neckK;
+void main() {
+  float a = base * (exp(-vAge * 2.5) + neckGain * exp(-vAge * neckK)) * vB;
+  gl_FragColor = vec4(color * a, 1.0);
+}`;
+
+const FS_POINT = `
+precision mediump float;
+varying float vAge;
+varying float vB;
+uniform vec3 color;
+uniform float base;
+void main() {
+  vec2 d = gl_PointCoord - 0.5;
+  float g = exp(-dot(d, d) * 14.0);
+  gl_FragColor = vec4(color * g * base * vB, 1.0);
+}`;
+
+const progLine = program(VS, FS_LINE);
+const progPoint = program(VS, FS_POINT);
+
+// GPU ring buffer — one 8 KB slice uploaded per frame regardless of trail length
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, TOTAL * 16, gl.DYNAMIC_DRAW);
+const sliceScratch = new Float32Array(SAMPLES * 4);
+
+// Trail geometry. Preferred path: WEBGL_multi_draw issues one LINE_STRIP per slice
+// in a single call, so each sample is transformed once. The indexed-LINES fallback
+// lists every segment as a vertex pair, which shades every interior sample twice —
+// same picture, twice the vertex work, plus a ~5 MB index buffer to build and upload.
+const segPerSlice = (SAMPLES - 1) * 2;
+let mdFirsts = null, mdCounts = null;
+let idxBuf = null, IDX_TYPE = 0, IDX_BYTES = 0;
+if (multiDraw) {
+  // slot s always starts at s*SAMPLES and is always SAMPLES long, so a contiguous
+  // ring span is just these arrays read from offset `oldest` — nothing to rebuild
+  mdFirsts = new Int32Array(MAX_FRAMES);
+  mdCounts = new Int32Array(MAX_FRAMES);
+  for (let s = 0; s < MAX_FRAMES; s++) { mdFirsts[s] = s * SAMPLES; mdCounts[s] = SAMPLES; }
+} else {
+  const trailIdx = new (uintIdx ? Uint32Array : Uint16Array)(MAX_FRAMES * segPerSlice);
+  for (let s = 0, k = 0; s < MAX_FRAMES; s++) {
+    for (let i = 0; i < SAMPLES - 1; i++) {
+      trailIdx[k++] = s * SAMPLES + i;
+      trailIdx[k++] = s * SAMPLES + i + 1;
+    }
+  }
+  idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);   // the only element buffer, so bind once
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, trailIdx, gl.STATIC_DRAW);
+  IDX_TYPE = uintIdx ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+  IDX_BYTES = uintIdx ? 4 : 2;
+}
+// draw ring slots a..b inclusive
+const drawSpan = multiDraw
+  ? (a, b) => multiDraw.multiDrawArraysWEBGL(gl.LINE_STRIP, mdFirsts, a, mdCounts, a, b - a + 1)
+  : (a, b) => gl.drawElements(gl.LINES, (b - a + 1) * segPerSlice, IDX_TYPE, a * segPerSlice * IDX_BYTES);
+
+// faint reference cube (x, y, age, vel), toggled with the box button
+const CV = 0.03;
+const cube = new Float32Array([
+  -1,-1,0,CV,  1,-1,0,CV,   1,-1,0,CV,  1,1,0,CV,   1,1,0,CV, -1,1,0,CV,  -1,1,0,CV, -1,-1,0,CV,
+  -1,-1,1,CV,  1,-1,1,CV,   1,-1,1,CV,  1,1,1,CV,   1,1,1,CV, -1,1,1,CV,  -1,1,1,CV, -1,-1,1,CV,
+  -1,-1,0,CV, -1,-1,1,CV,   1,-1,0,CV,  1,-1,1,CV,  1,1,0,CV,  1,1,1,CV,  -1,1,0,CV, -1,1,1,CV
+]);
+const cubeBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
+gl.bufferData(gl.ARRAY_BUFFER, cube, gl.STATIC_DRAW);
+
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.ONE, gl.ONE);   // additive — phosphor glow
+
+function locs(p) {
+  return {
+    _v: {},   // last value pushed for each uniform — GL calls aren't free, and most
+              // of these are identical frame after frame
+    pos: gl.getAttribLocation(p, "pos"),
+    rot: gl.getUniformLocation(p, "rot"),
+    flip: gl.getUniformLocation(p, "flip"),
+    aspect: gl.getUniformLocation(p, "aspect"),
+    zoom: gl.getUniformLocation(p, "zoom"),
+    ptScale: gl.getUniformLocation(p, "ptScale"),
+    head: gl.getUniformLocation(p, "head"),
+    count: gl.getUniformLocation(p, "count"),
+    maxF: gl.getUniformLocation(p, "maxF"),
+    ageMode: gl.getUniformLocation(p, "ageMode"),
+    depthLen: gl.getUniformLocation(p, "depthLen"),
+    neckGain: gl.getUniformLocation(p, "neckGain"),
+    neckK: gl.getUniformLocation(p, "neckK"),
+    persK: gl.getUniformLocation(p, "persK"),
+    color: gl.getUniformLocation(p, "color"),
+    base: gl.getUniformLocation(p, "base"),
+  };
+}
+const L1 = locs(progLine), L2 = locs(progPoint);
+
+/* redundant-state filters. uniform values are per-program, so caching them on the
+   locs object is safe; attribute + buffer bindings are global (no VAO in WebGL 1),
+   so those get one shared cache. */
+function uf(L, k, v) {
+  if (L._v[k] !== v) { L._v[k] = v; gl.uniform1f(L[k], v); }
+}
+function uv3(L, k, a) {
+  const c = L._v, r = a[0], g = a[1], b = a[2];
+  if (c[k] === undefined) c[k] = new Float32Array(3);
+  const p = c[k];
+  if (p[0] !== r || p[1] !== g || p[2] !== b) {
+    p[0] = r; p[1] = g; p[2] = b;
+    gl.uniform3f(L[k], r, g, b);
+  }
+}
+let boundArray = null, attrBuf = null, attrLoc = -1;
+function bindArray(b) {
+  if (boundArray !== b) { gl.bindBuffer(gl.ARRAY_BUFFER, b); boundArray = b; }
+}
+function useAttrib(loc, b) {
+  bindArray(b);
+  if (attrBuf !== b || attrLoc !== loc) {
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, 0, 0);
+    attrBuf = b; attrLoc = loc;
+  }
+}
+
+/* ================= interaction & controls ================= */
+const DEG = 180 / Math.PI, RAD = Math.PI / 180;
+function wrapPi(a) {                 // fold into (-180°, 180°] — also stops the spin
+  a = (a + Math.PI) % (2 * Math.PI); // accumulator drifting into float mush after hours
+  if (a < 0) a += 2 * Math.PI;
+  return a - Math.PI;
+}
+let yaw = wrapPi(S.yaw), pitch = wrapPi(S.pitch), roll = wrapPi(S.roll);
+let dragging = false, lx = 0, ly = 0, hueOff = 0;
+const PITCH_MAX = Math.PI / 2;
+// ±90° keeps a drag from tumbling over the pole, but the range is widened to include
+// wherever pitch already is, so a spun or typed-in angle is never yanked back
+function dragPitch(p) {
+  return Math.max(Math.min(-PITCH_MAX, pitch), Math.min(Math.max(PITCH_MAX, pitch), p));
+}
+
+// pointer events cover mouse + touch; two fingers = pinch zoom
+const pointers = new Map();
+let pinchD = 0;
+function pinchDist() {
+  const v = [...pointers.values()];
+  return Math.hypot(v[0].x - v[1].x, v[0].y - v[1].y);
+}
+canvas.addEventListener("pointerdown", e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 1) { dragging = true; lx = e.clientX; ly = e.clientY; }
+  else { dragging = false; pinchD = pointers.size === 2 ? pinchDist() : 0; }
+});
+canvas.addEventListener("pointermove", e => {
+  const pt = pointers.get(e.pointerId);
+  if (!pt) return;
+  pt.x = e.clientX; pt.y = e.clientY;
+  if (pointers.size === 2) {
+    const d = pinchDist();
+    if (pinchD > 0) {
+      S.zoom = Math.max(0.35, Math.min(4.5, S.zoom * d / pinchD));
+      save();
+    }
+    pinchD = d;
+  } else if (dragging) {
+    yaw = wrapPi(yaw + (e.clientX - lx) * 0.006);
+    pitch = dragPitch(pitch + (e.clientY - ly) * 0.006);
+    lx = e.clientX; ly = e.clientY;
+  }
+});
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  pinchD = 0;
+  if (dragging) saveAngles();   // persist where the view was left, not every frame of the drag
+  if (pointers.size === 1) {
+    const p = pointers.values().next().value;
+    dragging = true; lx = p.x; ly = p.y;
+  } else if (pointers.size === 0) {
+    dragging = false;
+  }
+}
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+window.addEventListener("wheel", e => {
+  S.zoom *= e.deltaY > 0 ? 0.92 : 1.08;
+  S.zoom = Math.max(0.35, Math.min(4.5, S.zoom));
+  save();
+});
+
+const $ = id => document.getElementById(id);
+
+function setSpin(v) {
+  S.spinOn = v;
+  $("bSpin").textContent = S.spinOn ? "spin: on" : "spin: off";
+  $("bSpin").classList.toggle("active", S.spinOn);
+  save();
+}
+function setAuto(v) {
+  S.autoGain = v;
+  $("bAuto").textContent = S.autoGain ? "auto-gain: on" : "auto-gain: off";
+  $("bAuto").classList.toggle("active", S.autoGain);
+  save();
+}
+function setBox(v) {
+  S.showBox = v;
+  $("bBox").textContent = S.showBox ? "box: on" : "box: off";
+  $("bBox").classList.toggle("active", S.showBox);
+  save();
+}
+function setCycle(v) {
+  S.hueCycle = v;
+  $("bCycle").textContent = S.hueCycle ? "cycle: on" : "cycle: off";
+  $("bCycle").classList.toggle("active", S.hueCycle);
+  save();
+}
+function setUiScale(v) {
+  // scale via font-size — everything in the panel is em-based. (css zoom broke
+  // fixed-position layout, especially with the panel anchored to both edges.)
+  S.uiScale = v;
+  $("ui").style.fontSize = (13 * v) + "px";
+  $("hints").style.fontSize = (12 * v) + "px";
+  save();
+}
+function setUiHidden(v) {
+  S.uiHidden = v;
+  $("panel").style.display = v ? "none" : "";
+  $("hints").style.display = v ? "none" : "";
+  $("bHide").textContent = v ? "show" : "hide";
+  save();
+}
+function setFlip(ax, v, announce = false) {
+  S["flip" + ax] = v;
+  const button = $("bFlip" + ax);
+  button.classList.toggle("active", v);
+  button.setAttribute("aria-pressed", String(v));
+  save();
+  if (announce) {
+    const meaning = {
+      X: "left-channel axis",
+      Y: "right-channel axis",
+      Z: "trail depth/time (most visible in 3d view)",
+    }[ax];
+    status(`${ax.toLowerCase()} mirror ${v ? "on" : "off"} — ${meaning}.`);
+  }
+}
+function saveAngles() {
+  S.yaw = yaw; S.pitch = pitch; S.roll = roll;
+  save();
+}
+// the numeric fields are the readout as well as the input, so the render loop pushes
+// the live angle back into them; skip whichever one has focus so typing isn't clobbered
+function setNum(el, deg) {
+  if (el === document.activeElement) return;
+  const s = String(Math.round(deg * 10) / 10);
+  if (el.value !== s) el.value = s;
+}
+let angleSyncAt = 0;
+function syncAngles(now) {
+  if (S.uiHidden || now - angleSyncAt < 100) return;   // 10 Hz is plenty for a readout
+  angleSyncAt = now;
+  setNum($("nYaw"), yaw * DEG);
+  setNum($("nPitch"), pitch * DEG);
+  setNum($("nRoll"), roll * DEG);
+}
+function bindAngle(id, axis, set) {
+  $(id).addEventListener("input", e => {
+    const v = parseFloat(e.target.value);
+    if (!isFinite(v)) return;                    // mid-edit ("", "-") — wait for a number
+    set(wrapPi(v * RAD));
+    if (S.spinOn && S.spinAxis === axis) setSpin(false);   // else it drifts off the typed angle
+    saveAngles();
+  });
+}
+function applyPreset(name) {
+  S.preset = name;
+  if (PRESETS[name]) {
+    S.beamColor = PRESETS[name].beamColor;
+    S.trailColor = PRESETS[name].trailColor;
+    $("cBeam").value = S.beamColor;
+    $("cTrail").value = S.trailColor;
+  }
+  save();
+}
+
+// wire controls from persisted settings
+$("rSpeed").value = S.spinSpeed;
+S.uiScale = Math.max(0.5, Math.min(1.6, S.uiScale));
+S.trailLen = Math.min(S.trailLen, MAX_FRAMES);
+$("rTrail").max = MAX_FRAMES;
+$("rTrail").value = S.trailLen;
+$("vTrail").textContent = S.trailLen;
+$("rGlow").value = S.glow;
+$("rBeam").value = S.beamSize;
+$("rGain").value = S.gain;
+$("rUi").value = S.uiScale;
+$("rTrailInt").value = S.trailInt;
+$("cBeam").value = S.beamColor;
+$("cTrail").value = S.trailColor;
+$("cBg").value = S.bgColor;
+$("selPreset").value = S.preset;
+$("selAxis").value = S.spinAxis;
+setSpin(S.spinOn); setAuto(S.autoGain); setBox(S.showBox); setCycle(S.hueCycle);
+setUiScale(S.uiScale); setUiHidden(S.uiHidden);
+setFlip("X", S.flipX); setFlip("Y", S.flipY); setFlip("Z", S.flipZ);
+
+$("bSpin").addEventListener("click", () => setSpin(!S.spinOn));
+$("bAuto").addEventListener("click", () => setAuto(!S.autoGain));
+$("bBox").addEventListener("click", () => setBox(!S.showBox));
+$("bCycle").addEventListener("click", () => setCycle(!S.hueCycle));
+$("bHide").addEventListener("click", () => setUiHidden(!S.uiHidden));
+function setView(y, p, r) {
+  yaw = y; pitch = p; roll = r || 0;
+  angleSyncAt = 0;   // push the new numbers to the fields on the next frame
+  setSpin(false);
+  saveAngles();
+}
+$("bFront").addEventListener("click", () => setView(0, 0));            // X · Y — classic scope
+$("bSide").addEventListener("click", () => setView(Math.PI / 2, 0));   // time · Y — right-channel wave
+$("bTop").addEventListener("click", () => setView(0, Math.PI / 2));    // X · time — waterfall
+$("bIso").addEventListener("click", () => setView(0.55, 0.32));        // default 3D angle
+bindAngle("nYaw", "yaw", v => yaw = v);
+bindAngle("nPitch", "pitch", v => pitch = v);
+bindAngle("nRoll", "roll", v => roll = v);
+$("bFlipX").addEventListener("click", () => setFlip("X", !S.flipX, true));
+$("bFlipY").addEventListener("click", () => setFlip("Y", !S.flipY, true));
+$("bFlipZ").addEventListener("click", () => setFlip("Z", !S.flipZ, true));
+$("selAxis").addEventListener("change", e => { S.spinAxis = e.target.value; save(); });
+$("bFull").addEventListener("click", () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen();
+});
+$("bReset").addEventListener("click", () => {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = 0; }   // don't let it rewrite what we just cleared
+  try { localStorage.removeItem(SETTINGS_KEY); } catch (_) {}
+  location.reload();
+});
+$("rSpeed").addEventListener("input", e => { S.spinSpeed = +e.target.value; save(); });
+$("rTrail").addEventListener("input", e => { S.trailLen = e.target.value | 0; $("vTrail").textContent = S.trailLen; save(); });
+$("rGlow").addEventListener("input", e => { S.glow = +e.target.value; save(); });
+$("rBeam").addEventListener("input", e => { S.beamSize = +e.target.value; save(); });
+$("rGain").addEventListener("input", e => { S.gain = +e.target.value; save(); });
+$("rUi").addEventListener("input", e => setUiScale(+e.target.value));
+$("rTrailInt").addEventListener("input", e => { S.trailInt = +e.target.value; save(); });
+$("cBeam").addEventListener("input", e => { S.beamColor = e.target.value; S.preset = "custom"; $("selPreset").value = "custom"; save(); });
+$("cTrail").addEventListener("input", e => { S.trailColor = e.target.value; S.preset = "custom"; $("selPreset").value = "custom"; save(); });
+$("cBg").addEventListener("input", e => { S.bgColor = e.target.value; save(); });
+$("selPreset").addEventListener("change", e => applyPreset(e.target.value));
+$("selDemo").addEventListener("change", e => {
+  S.demoTone = e.target.value;
+  save();
+  updateDemoRows();
+  if (currentMode === "demo") useDemo();   // hot-swap the tone
+});
+
+// drop focus after any button click so space can't re-trigger it
+document.querySelectorAll("button").forEach(b => b.addEventListener("click", () => b.blur()));
+window.addEventListener("keydown", e => {
+  if (e.target !== document.body && e.target !== canvas) return;
+  if (e.code === "Space") { e.preventDefault(); setSpin(!S.spinOn); }
+  else if (e.code === "KeyH") setUiHidden(!S.uiHidden);
+  else if (e.code === "KeyF") $("bFull").click();
+});
+
+const rotBuf = new Float32Array(9);   // rebuilt in place every frame
+function rotMat(yaw, pitch, roll) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  // Rz(roll) * Ry(yaw) * Rx(pitch), column-major mat3. Roll is applied last so it
+  // turns the finished image in the screen plane, which is what "roll" reads as.
+  rotBuf[0] = cr * cy;              rotBuf[1] = sr * cy;              rotBuf[2] = -sy;
+  rotBuf[3] = cr * sy * sp - sr * cp; rotBuf[4] = sr * sy * sp + cr * cp; rotBuf[5] = cy * sp;
+  rotBuf[6] = cr * sy * cp + sr * sp; rotBuf[7] = sr * sy * cp - cr * sp; rotBuf[8] = cy * cp;
+  return rotBuf;
+}
+
+/* ================= audio ================= */
+let audioCtx = null, analyserL = null, analyserR = null;
+let liveStream = null, demoNodes = null;
+let currentMode = null, connecting = false;
+let demoRefs = {};   // live-tweakable nodes of the custom demo tone
+let lastSignalTime = performance.now(), lastRestart = 0;
+const timeL = new Float32Array(1024);
+const timeR = new Float32Array(1024);
+let head = MAX_FRAMES - 1, filled = 0;   // GPU ring position / how many slots hold real data
+let peakEnv = 0.3;   // running peak for auto-gain
+const statusEl = $("status");
+const btns = { sys: $("bSys"), mic: $("bMic"), demo: $("bDemo") };
+
+function setActive(which) {
+  currentMode = which;
+  for (const k in btns) btns[k].classList.toggle("active", k === which);
+}
+function status(msg) { statusEl.textContent = msg; console.log("[OS3D] " + msg); }
+
+function stopAll() {
+  if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
+  if (demoNodes) { try { demoNodes.forEach(n => n.stop && n.stop()); } catch (_) {} demoNodes = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  analyserL = analyserR = null;
+  demoRefs = {};
+  filled = 0;   // clear the trail — old signal's history shouldn't hang off the new beam
+}
+
+function buildAnalysers(sourceNode) {
+  const splitter = audioCtx.createChannelSplitter(2);
+  analyserL = audioCtx.createAnalyser();
+  analyserR = audioCtx.createAnalyser();
+  analyserL.fftSize = 1024;
+  analyserR.fftSize = 1024;
+  sourceNode.connect(splitter);
+  splitter.connect(analyserL, 0);
+  splitter.connect(analyserR, 1);
+}
+
+async function useSystem() {
+  if (connecting) return;
+  connecting = true;
+  stopAll();
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    if (stream.getAudioTracks().length === 0) {
+      stream.getTracks().forEach(t => t.stop());
+      status("no audio in that share — pick a screen/tab and tick “also share audio”.");
+      setActive(null);
+      return;
+    }
+    liveStream = stream;
+    audioCtx = new AudioContext();
+    buildAnalysers(audioCtx.createMediaStreamSource(stream));
+    const at = stream.getAudioTracks()[0];
+    // loopback can die silently on device change/starvation — reconnect on any track death
+    const onTrackTrouble = () => { if (currentMode === "sys") scheduleReconnect("audio track dropped"); };
+    at.addEventListener("ended", onTrackTrouble);
+    at.addEventListener("mute", onTrackTrouble);
+    stream.getVideoTracks()[0].addEventListener("ended", () => {
+      if (!IS_ELECTRON) { stopAll(); setActive(null); status("share ended."); }
+    });
+    lastSignalTime = performance.now();
+    setActive("sys");
+    status("listening to system audio — play something.");
+  } catch (err) {
+    status("share cancelled or blocked (" + err.name + ").");
+    setActive(null);
+  } finally {
+    connecting = false;
+  }
+}
+
+async function useMic() {
+  if (connecting) return;
+  connecting = true;
+  stopAll();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+    liveStream = stream;
+    audioCtx = new AudioContext();
+    buildAnalysers(audioCtx.createMediaStreamSource(stream));
+    setActive("mic");
+    status("listening to microphone. (mono mics draw on the diagonal.)");
+  } catch (err) {
+    status("microphone blocked (" + err.name + ").");
+    setActive(null);
+  } finally {
+    connecting = false;
+  }
+}
+
+/* test tones — each builds source nodes into the L/R merger and returns them */
+const DEMOS = {
+  drift: {
+    desc: "two drifting oscillators — a morphing 3D Lissajous.",
+    build(ctx, merger) {
+      const l = ctx.createOscillator(), r = ctx.createOscillator();
+      const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
+      l.frequency.value = 220;
+      r.frequency.value = 331;         // ~3:2, slowly bent by the LFO
+      lfo.frequency.value = 0.07;
+      lfoGain.gain.value = 55;
+      lfo.connect(lfoGain).connect(r.frequency);
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r, lfo];
+    },
+  },
+  circle: {
+    desc: "equal tones a hair apart — a ring rolling through every phase.",
+    build(ctx, merger) {
+      const l = ctx.createOscillator(), r = ctx.createOscillator();
+      l.frequency.value = 220;
+      r.frequency.value = 220.25;      // full phase cycle every 4 s
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r];
+    },
+  },
+  octave: {
+    desc: "octave pair (1:2) — a slowly turning figure-eight.",
+    build(ctx, merger) {
+      const l = ctx.createOscillator(), r = ctx.createOscillator();
+      l.frequency.value = 220;
+      r.frequency.value = 440.3;
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r];
+    },
+  },
+  saw: {
+    desc: "saw against sine — a raked scan pattern.",
+    build(ctx, merger) {
+      const l = ctx.createOscillator(), r = ctx.createOscillator();
+      l.type = "sawtooth";
+      l.frequency.value = 110;
+      r.frequency.value = 110.15;
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r];
+    },
+  },
+  sweep: {
+    desc: "rising sweep against a fixed tone — a drilling spiral.",
+    build(ctx, merger) {
+      const l = ctx.createOscillator(), r = ctx.createOscillator();
+      const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();
+      l.frequency.value = 220;
+      r.frequency.value = 440;         // swept 110..770 every 20 s
+      lfo.type = "sawtooth";
+      lfo.frequency.value = 0.05;
+      lfoGain.gain.value = 330;
+      lfo.connect(lfoGain).connect(r.frequency);
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r, lfo];
+    },
+  },
+  noise: {
+    desc: "uncorrelated stereo noise — a breathing cloud.",
+    build(ctx, merger) {
+      const mk = () => {
+        const len = ctx.sampleRate * 2;
+        const b = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = b.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = b;
+        src.loop = true;
+        return src;
+      };
+      const l = mk(), r = mk();
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r];
+    },
+  },
+  chord: {
+    desc: "major chord split across channels — a woven knot.",
+    build(ctx, merger) {
+      const mk = (f, ch) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = f;
+        g.gain.value = 0.5;
+        o.connect(g).connect(merger, 0, ch);
+        return o;
+      };
+      // L: root + fifth, R: third + octave — tiny detunes keep it turning
+      return [mk(220, 0), mk(330.2, 0), mk(277.4, 1), mk(440.6, 1)];
+    },
+  },
+  fm: {
+    desc: "fm pair with inharmonic partials — tumbling bell shapes.",
+    build(ctx, merger) {
+      const l = ctx.createOscillator(), r = ctx.createOscillator();
+      l.frequency.value = 220;
+      r.frequency.value = 220.3;
+      const mkMod = (f, depth, target) => {
+        const m = ctx.createOscillator(), g = ctx.createGain();
+        m.frequency.value = f;
+        g.gain.value = depth;
+        m.connect(g).connect(target.frequency);
+        return m;
+      };
+      const m1 = mkMod(550, 180, l);   // 2.5:1
+      const m2 = mkMod(770, 240, r);   // 3.5:1 — bell-ish
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r, m1, m2];
+    },
+  },
+  pulse: {
+    desc: "gated tones at 2:3 rhythm — bursts beading down the trail.",
+    build(ctx, merger) {
+      const mkGate = (f, lfoHz, ch) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = f;
+        g.gain.value = 0;
+        const lfo = ctx.createOscillator(), s = ctx.createGain();
+        lfo.type = "square";
+        lfo.frequency.value = lfoHz;
+        s.gain.value = 0.5;
+        const off = ctx.createConstantSource();
+        off.offset.value = 0.5;
+        lfo.connect(s).connect(g.gain);   // square −1..1 → gain 0..1
+        off.connect(g.gain);
+        o.connect(g).connect(merger, 0, ch);
+        return [o, lfo, off];
+      };
+      return [...mkGate(220, 2, 0), ...mkGate(330, 3, 1)];
+    },
+  },
+  brown: {
+    desc: "brown noise — a slow wandering blob.",
+    build(ctx, merger) {
+      const mk = () => {
+        const len = ctx.sampleRate * 4;
+        const b = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = b.getChannelData(0);
+        let v = 0;
+        for (let i = 0; i < len; i++) {
+          v = (v + (Math.random() * 2 - 1) * 0.02) * 0.998;
+          d[i] = Math.max(-1, Math.min(1, v * 3));
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = b;
+        src.loop = true;
+        return src;
+      };
+      const l = mk(), r = mk();
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      return [l, r];
+    },
+  },
+  hypercube: {
+    desc: "square-gated tones on quadrature envelopes — a rotating hypercube.",
+    build(ctx, merger) {
+      const F_C = 120;    // structure — the square gate carves the edges
+      const F_M = 300;    // depth
+      const F_R = 0.5;    // 3d rotation
+      const TAU = 2 * Math.PI;
+      const sgn = v => Math.sign(v) || 1;          // never let the gate sit at 0
+      // 2 s holds a whole rotation and integer cycles of both tones, so it loops seamlessly
+      const sr = ctx.sampleRate, len = sr * 2;
+      const buf = ctx.createBuffer(2, len, sr);
+      const L = buf.getChannelData(0), R = buf.getChannelData(1);
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        const c = TAU * F_C * t, m = TAU * F_M * t, r = TAU * F_R * t;
+        L[i] = sgn(Math.sin(c)) * Math.cos(m) * Math.sin(r);
+        R[i] = sgn(Math.cos(c)) * Math.cos(m) * Math.cos(r);   // cos m == sin(m + pi/2)
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const split = ctx.createChannelSplitter(2);
+      src.connect(split);
+      split.connect(merger, 0, 0);
+      split.connect(merger, 1, 1);
+      return [src];
+    },
+  },
+  custom: {
+    desc: "your own two-channel signal — shape it with the rows below.",
+    build(ctx, merger) {
+      const c = S.custom;
+      const l = ctx.createOscillator(), r = ctx.createOscillator();
+      l.type = c.lt; l.frequency.value = c.lf;
+      r.type = c.rt; r.frequency.value = c.rf + c.det;
+      const lfo = ctx.createOscillator(), g = ctx.createGain();
+      lfo.frequency.value = c.rate;
+      g.gain.value = c.depth;
+      lfo.connect(g).connect(r.frequency);
+      l.connect(merger, 0, 0); r.connect(merger, 0, 1);
+      demoRefs = { l, r, lfo, g };
+      return [l, r, lfo];
+    },
+  },
+  formula: {
+    desc: "x(t) / y(t) formulas — sin cos tan saw sq tri nz, pi tau, t in seconds. 4 s loop.",
+    build(ctx, merger) {
+      const fl = compileFormula(S.formulaL);
+      const fr = compileFormula(S.formulaR);
+      const sr = ctx.sampleRate, len = sr * 4;
+      const buf = ctx.createBuffer(2, len, sr);
+      const L = buf.getChannelData(0), R = buf.getChannelData(1);
+      const clampS = v => isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0;
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        L[i] = clampS(fl(t));
+        R[i] = clampS(fr(t));
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const split = ctx.createChannelSplitter(2);
+      src.connect(split);
+      split.connect(merger, 0, 0);
+      split.connect(merger, 1, 1);
+      return [src];
+    },
+  },
+};
+
+const FORMULA_PRELUDE =
+  "var sin=Math.sin,cos=Math.cos,tan=Math.tan,abs=Math.abs,sign=Math.sign," +
+  "pow=Math.pow,sqrt=Math.sqrt,exp=Math.exp,log=Math.log,floor=Math.floor," +
+  "min=Math.min,max=Math.max,pi=Math.PI,tau=2*Math.PI;" +
+  "var saw=function(x){x=x/tau+0.5;return 2*(x-Math.floor(x))-1;};" +
+  "var sq=function(x){return Math.sign(Math.sin(x))||1;};" +
+  "var tri=function(x){return 2*Math.abs(saw(x))-1;};" +
+  "var nz=function(){return Math.random()*2-1;};";
+function compileFormula(expr) {
+  const f = new Function("t", FORMULA_PRELUDE + "return (" + expr + ");");
+  f(0);   // surface syntax/reference errors immediately
+  return f;
+}
+
+if (!DEMOS[S.demoTone]) { S.demoTone = "drift"; save(); }
+$("selDemo").value = S.demoTone;
+
+function useDemo() {
+  stopAll();
+  audioCtx = new AudioContext();
+  const merger = audioCtx.createChannelMerger(2);
+  try {
+    demoNodes = DEMOS[S.demoTone].build(audioCtx, merger);
+  } catch (err) {
+    status("formula error: " + err.message);
+    setActive(null);
+    return;
+  }
+  buildAnalysers(merger);
+  const out = audioCtx.createGain();
+  out.gain.value = 0.05;               // audible but quiet
+  merger.connect(out).connect(audioCtx.destination);
+  demoNodes.forEach(n => n.start && n.start());
+  setActive("demo");
+  status("demo: " + DEMOS[S.demoTone].desc);
+}
+
+/* --- custom / formula tone controls --- */
+function updateDemoRows() {
+  document.querySelectorAll(".rowCustom").forEach(el => el.hidden = S.demoTone !== "custom");
+  document.querySelectorAll(".rowFormula").forEach(el => el.hidden = S.demoTone !== "formula");
+}
+updateDemoRows();
+
+$("cuLType").value = S.custom.lt;
+$("cuRType").value = S.custom.rt;
+$("cuLF").value = S.custom.lf;
+$("cuRF").value = S.custom.rf;
+$("vLF").textContent = S.custom.lf + " hz";
+$("vRF").textContent = S.custom.rf + " hz";
+$("cuDet").value = S.custom.det;
+$("cuRate").value = S.custom.rate;
+$("cuDepth").value = S.custom.depth;
+$("fxL").value = S.formulaL;
+$("fxR").value = S.formulaR;
+
+function applyCustomLive() {
+  save();
+  if (currentMode === "demo" && S.demoTone === "custom" && demoRefs.l) {
+    const c = S.custom;
+    demoRefs.l.type = c.lt;
+    demoRefs.r.type = c.rt;
+    demoRefs.l.frequency.value = c.lf;
+    demoRefs.r.frequency.value = c.rf + c.det;
+    demoRefs.lfo.frequency.value = c.rate;
+    demoRefs.g.gain.value = c.depth;
+  }
+}
+$("cuLType").addEventListener("change", e => { S.custom.lt = e.target.value; applyCustomLive(); });
+$("cuRType").addEventListener("change", e => { S.custom.rt = e.target.value; applyCustomLive(); });
+$("cuLF").addEventListener("input", e => { S.custom.lf = +e.target.value; $("vLF").textContent = S.custom.lf + " hz"; applyCustomLive(); });
+$("cuRF").addEventListener("input", e => { S.custom.rf = +e.target.value; $("vRF").textContent = S.custom.rf + " hz"; applyCustomLive(); });
+$("cuDet").addEventListener("input", e => { S.custom.det = +e.target.value; applyCustomLive(); });
+$("cuRate").addEventListener("input", e => { S.custom.rate = +e.target.value; applyCustomLive(); });
+$("cuDepth").addEventListener("input", e => { S.custom.depth = +e.target.value; applyCustomLive(); });
+
+function applyFormula() {
+  S.formulaL = $("fxL").value;
+  S.formulaR = $("fxR").value;
+  save();
+  // restart when the formula demo is running, or when nothing is (e.g. the
+  // previous formula errored out) — apply means "play this now"
+  if (S.demoTone === "formula" && (currentMode === "demo" || currentMode === null)) useDemo();
+}
+$("bApply").addEventListener("click", applyFormula);
+$("fxL").addEventListener("keydown", e => { if (e.key === "Enter") applyFormula(); });
+$("fxR").addEventListener("keydown", e => { if (e.key === "Enter") applyFormula(); });
+
+btns.sys.addEventListener("click", useSystem);
+btns.mic.addEventListener("click", useMic);
+btns.demo.addEventListener("click", useDemo);
+
+// over plain http on the LAN the capture APIs don't exist (browser secure-context rule)
+const insecurePage = !navigator.mediaDevices;
+if (insecurePage) {
+  btns.sys.disabled = btns.mic.disabled = true;
+  status("mic & system audio need a secure page — only the demo signal works at this address.");
+} else if (!navigator.mediaDevices.getDisplayMedia) {
+  btns.sys.disabled = true;
+  status("no system-audio capture on this device — use microphone or demo.");
+}
+
+if (matchMedia("(pointer: coarse)").matches) {
+  $("hints").textContent = "drag · rotate    pinch · zoom    flip: X=left  Y=right  Z=time";
+}
+
+/* ================= capture watchdog =================
+   WASAPI loopback dies silently when the output device changes or the stream
+   starves. In Electron a re-grab is promptless, so heal automatically; in the
+   browser (needs a user gesture) just say what happened. */
+function scheduleReconnect(why) {
+  const now = performance.now();
+  if (!IS_ELECTRON || connecting || now - lastRestart < 5000) return;
+  lastRestart = now;
+  status(why + " — reconnecting…");
+  useSystem();
+}
+setInterval(() => {
+  if (currentMode !== "sys" || connecting) return;
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  const t = liveStream && liveStream.getAudioTracks()[0];
+  const dead = !t || t.readyState !== "live" || t.muted;
+  const stale = performance.now() - lastSignalTime > 30000;
+  if (dead || stale) {
+    if (IS_ELECTRON) {
+      if (performance.now() - lastRestart > 30000) {
+        lastRestart = performance.now();
+        status((dead ? "capture died" : "no signal") + " — reconnecting…");
+        useSystem();
+      }
+    } else if (dead) {
+      status("capture stalled — click system audio to reconnect.");
+    }
+  }
+}, 3000);
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener("devicechange", () => {
+    if (currentMode === "sys") scheduleReconnect("output device changed");
+  });
+}
+
+/* ================= render loop ================= */
+// Reading clientWidth/clientHeight forces the browser to flush layout. Doing that
+// once per frame stalls the pipeline for nothing — the canvas only changes size on
+// an actual resize, so measure when something says it did.
+let dpr = 1, aspect = 1, needResize = true;
+function doResize() {
+  needResize = false;
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.floor(canvas.clientWidth * dpr), h = Math.floor(canvas.clientHeight * dpr);
+  if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
+    canvas.width = w; canvas.height = h;
+    gl.viewport(0, 0, w, h);
+  }
+  aspect = canvas.height ? canvas.width / canvas.height : 1;
+}
+const markResize = () => { needResize = true; };
+addEventListener("resize", markResize);
+addEventListener("orientationchange", markResize);
+document.addEventListener("fullscreenchange", markResize);
+if (window.ResizeObserver) new ResizeObserver(markResize).observe(canvas);
+// dragging the window to a display with a different scale factor changes devicePixelRatio
+// without changing the css size, so neither of the above fires
+(function watchDpr() {
+  if (!window.matchMedia) return;
+  const mq = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+  if (!mq.addEventListener) return;
+  mq.addEventListener("change", () => { markResize(); watchDpr(); }, { once: true });
+})();
+
+// reused every frame so the loop allocates nothing
+const beamRGB = new Float32Array(3), trailRGB = new Float32Array(3);
+const coreRGB = new Float32Array(3), bgRGB = new Float32Array(3);
+const flipVec = new Float32Array(3);
+
+let lastT = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - lastT) / 1000, 0.1);
+  lastT = now;
+  if (needResize) doResize();
+
+  if (analyserL) {
+    analyserL.getFloatTimeDomainData(timeL);
+    analyserR.getFloatTimeDomainData(timeR);
+    const stride = timeL.length / SAMPLES;
+    // pass 1 finds the peak, which auto-gain needs before anything can be scaled
+    let pk = 0;
+    for (let i = 0; i < SAMPLES; i++) {
+      const j = (i * stride) | 0;
+      const a = Math.abs(timeL[j]), b = Math.abs(timeR[j]);
+      if (a > pk) pk = a;
+      if (b > pk) pk = b;
+    }
+    if (pk > 1e-4) lastSignalTime = now;
+    peakEnv = Math.max(pk, peakEnv * 0.995);
+    const g = S.gain * (S.autoGain ? 1 / Math.max(peakEnv, 0.08) : 1);
+
+    // push the new slice into the next ring slot — the only GPU upload per frame
+    head = (head + 1) % MAX_FRAMES;
+    filled = Math.min(filled + 1, MAX_FRAMES);
+    // pass 2 scales, differentiates and interleaves in one go, straight into the
+    // upload buffer — the old code made three passes through three scratch arrays
+    for (let i = 0, o = 0; i < SAMPLES; i++, o += 4) {
+      const j = (i * stride) | 0;
+      sliceScratch[o] = timeL[j] * g;
+      sliceScratch[o + 1] = timeR[j] * g;
+      sliceScratch[o + 2] = head;
+      if (i > 0) {
+        // velocity is the forward difference, so sample i closes out slot i-1.
+        // Reading the pair back out of the buffer keeps this float32, matching
+        // the scratch-array version it replaced exactly rather than to 1 ulp.
+        const dx = sliceScratch[o] - sliceScratch[o - 4];
+        const dy = sliceScratch[o + 1] - sliceScratch[o - 3];
+        sliceScratch[o - 1] = Math.sqrt(dx * dx + dy * dy);
+      }
+    }
+    sliceScratch[(SAMPLES - 1) * 4 + 3] = sliceScratch[(SAMPLES - 2) * 4 + 3];   // last has no successor
+    bindArray(buf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, head * SAMPLES * 16, sliceScratch);
+  }
+
+  if (S.spinOn && !dragging) {
+    const d = dt * S.spinSpeed;
+    if (S.spinAxis === "pitch") pitch = wrapPi(pitch + d);
+    else if (S.spinAxis === "roll") roll = wrapPi(roll + d);
+    else yaw = wrapPi(yaw + d);
+  }
+  syncAngles(now);
+  if (S.hueCycle) hueOff = (hueOff + dt * 14) % 360;
+
+  hexToRgb(S.beamColor, beamRGB);
+  hexToRgb(S.trailColor, trailRGB);
+  if (S.hueCycle) {
+    rotHue(beamRGB, hueOff, beamRGB);
+    rotHue(trailRGB, hueOff, trailRGB);
+  }
+  for (let i = 0; i < 3; i++) coreRGB[i] = beamRGB[i] + (1 - beamRGB[i]) * 0.35;   // hot core toward white
+  hexToRgb(S.bgColor, bgRGB);
+
+  gl.clearColor(bgRGB[0], bgRGB[1], bgRGB[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  const rot = rotMat(yaw, pitch, roll);
+  const n = Math.min(filled, S.trailLen);
+  const depthLen = 1.5 * Math.max(1, n / 144);   // classic look up to 144, then the tail grows back
+  // keep the implicit camera (at z = -1/persK) outside the whole scene so no
+  // vertex can get behind it; equals the classic 0.25 for short trails
+  const persK = Math.min(0.25, 1 / (depthLen + 2.5));
+
+  flipVec[0] = S.flipX ? -1 : 1;
+  flipVec[1] = S.flipY ? -1 : 1;
+  flipVec[2] = S.flipZ ? -1 : 1;
+
+  gl.useProgram(progLine);
+  gl.uniformMatrix3fv(L1.rot, false, rot);
+  uv3(L1, "flip", flipVec);
+  uf(L1, "aspect", aspect);
+  uf(L1, "zoom", S.zoom * 0.62);
+  uf(L1, "head", head);
+  uf(L1, "count", n);
+  uf(L1, "maxF", MAX_FRAMES);
+  uf(L1, "depthLen", depthLen);
+  uf(L1, "persK", persK);
+
+  if (S.showBox) {
+    uf(L1, "ageMode", 1);
+    uf(L1, "neckGain", 0);
+    uv3(L1, "color", trailRGB);
+    uf(L1, "base", 0.35);
+    useAttrib(L1.pos, cubeBuf);
+    gl.drawArrays(gl.LINES, 0, cube.length / 4);
+  }
+
+  if (n > 0) {
+    uf(L1, "ageMode", 0);
+    useAttrib(L1.pos, buf);
+
+    // trail — thin fading lines, energy-normalized so length doesn't change brightness.
+    // one draw per contiguous ring span (two at most when the ring wraps)
+    if (n > 1 && S.trailInt > 0) {
+      uv3(L1, "color", trailRGB);
+      // normalize brightness by length, but floor at the classic 144 so long
+      // trails stay visible instead of fading to nothing
+      uf(L1, "base", 4.0 * S.glow * S.trailInt / Math.min(n, 144));
+      uf(L1, "neckGain", 4.0);
+      uf(L1, "neckK", (n - 1) / 24);   // boost spans ~24 newest slices
+      const hPrev = (head - 1 + MAX_FRAMES) % MAX_FRAMES;
+      const oldest = (head - (n - 1) + 2 * MAX_FRAMES) % MAX_FRAMES;
+      if (oldest <= hPrev) drawSpan(oldest, hPrev);
+      else { drawSpan(oldest, MAX_FRAMES - 1); drawSpan(0, hPrev); }
+    }
+
+    // live trace — full-strength line
+    uv3(L1, "color", beamRGB);
+    uf(L1, "base", 1.4 * S.glow);
+    uf(L1, "neckGain", 0);
+    gl.drawArrays(gl.LINE_STRIP, head * SAMPLES, SAMPLES);
+
+    // live trace — beam glow points (only the newest slice, so history can't wash out)
+    gl.useProgram(progPoint);
+    gl.uniformMatrix3fv(L2.rot, false, rot);
+    uv3(L2, "flip", flipVec);
+    uf(L2, "aspect", aspect);
+    uf(L2, "zoom", S.zoom * 0.62);
+    uf(L2, "head", head);
+    uf(L2, "count", n);
+    uf(L2, "maxF", MAX_FRAMES);
+    uf(L2, "ageMode", 0);
+    uf(L2, "depthLen", depthLen);
+    uf(L2, "persK", persK);
+    uf(L2, "ptScale", S.beamSize * dpr);
+    uf(L2, "base", 1.0 * S.glow);
+    uv3(L2, "color", coreRGB);
+    useAttrib(L2.pos, buf);
+    gl.drawArrays(gl.POINTS, head * SAMPLES, SAMPLES);
+  }
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
